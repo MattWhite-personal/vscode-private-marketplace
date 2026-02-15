@@ -18,10 +18,6 @@ variable "resource_name_suffix" {
   default = "vscode-privatemktplce"
 }
 
-variable "location" {
-  type = string
-}
-
 variable "container_registry" {
   type    = string
   default = "mcr.microsoft.com"
