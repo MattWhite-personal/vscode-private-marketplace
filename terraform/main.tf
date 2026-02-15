@@ -140,9 +140,8 @@ resource "azurerm_container_app" "app" {
   }
 
   secret {
-    identity = local.use_artifacts_source ? "UserAssigned" : null
-    name     = "registry-password"
-    value    = var.container_registry_password
+    name  = "registry-password"
+    value = var.container_registry_password
   }
 }
 
