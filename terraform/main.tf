@@ -62,6 +62,21 @@ resource "azurerm_storage_account" "sa" {
   account_replication_type = "LRS"
 }
 
+resource "azurerm_storage_share" "extensions" {
+  count                = local.use_filesystem_source ? 1 : 0
+  name                 = "extensions"
+  storage_account_name = azurerm_storage_account.sa[0].name
+  quota                = 5
+}
+
+resource "azurerm_storage_share" "logs" {
+  count                = var.enable_file_logging ? 1 : 0
+  name                 = "logs"
+  storage_account_name = azurerm_storage_account.sa[0].name
+  quota                = 5
+}
+
+
 resource "azurerm_user_assigned_identity" "identity" {
   count               = local.use_artifacts_source ? 1 : 0
   name                = "uai-${var.resource_name_suffix}"
@@ -114,7 +129,66 @@ resource "azurerm_container_app" "app" {
           value = "true"
         }
       }
+
+      # Filesystem extension source
+      dynamic "env" {
+        for_each = local.use_filesystem_source ? [1] : []
+        content {
+          name  = "Marketplace__ExtensionSourceDirectory"
+          value = "/data/extensions"
+        }
+      }
+
+      # Logs directory
+      dynamic "env" {
+        for_each = var.enable_file_logging ? [1] : []
+        content {
+          name  = "Marketplace__LogsDirectory"
+          value = "/data/logs"
+        }
+      }
+
+      # Mount extensions share
+      dynamic "volume_mounts" {
+        for_each = local.use_filesystem_source ? [1] : []
+        content {
+          name = "extensions"
+          path = "/data/extensions"
+        }
+      }
+
+      # Mount logs share
+      dynamic "volume_mounts" {
+        for_each = var.enable_file_logging ? [1] : []
+        content {
+          name = "logs"
+          path = "/data/logs"
+        }
+      }
+
+
     }
+
+    # Extensions volume
+    dynamic "volume" {
+      for_each = local.use_filesystem_source ? [1] : []
+      content {
+        name         = "extensions"
+        storage_name = azurerm_container_app_environment_storage.extensions[0].name
+        storage_type = "AzureFile"
+      }
+    }
+
+    # Logs volume
+    dynamic "volume" {
+      for_each = var.enable_file_logging ? [1] : []
+      content {
+        name         = "logs"
+        storage_name = azurerm_container_app_environment_storage.logs[0].name
+        storage_type = "AzureFile"
+      }
+    }
+
 
     min_replicas = 1
     max_replicas = 1
@@ -144,6 +218,21 @@ resource "azurerm_container_app" "app" {
     value = var.container_registry_password
   }
 }
+
+resource "azurerm_storage_share" "extensions" {
+  count                = local.use_filesystem_source ? 1 : 0
+  name                 = "extensions"
+  storage_account_name = azurerm_storage_account.sa[0].name
+  quota                = 5
+}
+
+resource "azurerm_storage_share" "logs" {
+  count                = var.enable_file_logging ? 1 : 0
+  name                 = "logs"
+  storage_account_name = azurerm_storage_account.sa[0].name
+  quota                = 5
+}
+
 
 output "container_app_url" {
   value = "https://${azurerm_container_app.app.latest_revision_fqdn}/"
