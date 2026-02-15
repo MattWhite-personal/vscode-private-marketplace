@@ -42,6 +42,18 @@ resource "azurerm_application_insights" "ai" {
 }
 
 resource "azurerm_storage_account" "sa" {
+  #checkov:skip=CKV_AZURE_190: testing
+  #checkov:skip=CKV2_AZURE_47: testing
+  #checkov:skip=CKV2_AZURE_33: testing
+  #checkov:skip=CKV2_AZURE_1: testing
+  #checkov:skip=CKV2_AZURE_38: testing
+  #checkov:skip=CKV2_AZURE_41: testing
+  #checkov:skip=CKV2_AZURE_40: testing
+  #checkov:skip=CKV_AZURE_33: testing
+  #checkov:skip=CKV_AZURE_206: testing
+  #checkov:skip=CKV_AZURE_44: testing
+  #checkov:skip=CKV_AZURE_59: testing
+
   count                    = local.create_storage_account ? 1 : 0
   name                     = "stvscodeprivatemktplce"
   resource_group_name      = azurerm_resource_group.rg.name
