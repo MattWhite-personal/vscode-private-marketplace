@@ -1,5 +1,6 @@
 variable "container_registry_username" {
   type = string
+  default = "test-admin"
 }
 
 variable "container_registry_password" {
