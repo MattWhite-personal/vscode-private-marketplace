@@ -150,14 +150,14 @@ resource "azurerm_container_app" "app" {
     # Extensions volume
     volume {
       name         = "extensions"
-      storage_name = azurerm_container_app_environment_storage.extensions[0].name
+      storage_name = azurerm_container_app_environment_storage.extensions.name
       storage_type = "AzureFile"
     }
 
     # Logs volume
     volume {
       name         = "logs"
-      storage_name = azurerm_container_app_environment_storage.logs[0].name
+      storage_name = azurerm_container_app_environment_storage.logs.name
       storage_type = "AzureFile"
     }
 
