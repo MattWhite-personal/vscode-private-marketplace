@@ -1,0 +1,221 @@
+﻿name: "Terraform Plan/Apply"
+
+on:
+  push:
+    branches:
+    - main
+    paths:
+      - 'terraform/**'
+  pull_request:
+    branches:
+    - main
+    paths:
+      - 'terraform/**'
+
+defaults:
+  run:
+    working-directory: ./terraform
+
+#Special permissions required for OIDC authentication
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+#These environment variables are used by the terraform azure provider to setup OIDC authenticate.
+env:
+  ARM_CLIENT_ID: "${{ secrets.AZURE_CLIENT_ID }}"
+  ARM_SUBSCRIPTION_ID: "${{ secrets.AZURE_SUBSCRIPTION_ID }}"
+  ARM_TENANT_ID: "${{ secrets.AZURE_TENANT_ID }}"
+  TF_VAR_repository: "${{ github.repository }}"
+  TF_VAR_runner_ip: ""
+
+jobs:
+  terraform-plan:
+    name: "Terraform Plan & Apply"
+    runs-on: ubuntu-latest
+    env:
+      #this is needed since we are running terraform with read-only permissions
+      ARM_SKIP_PROVIDER_REGISTRATION: true
+    outputs:
+      tfplanExitCode: ${{ steps.tf-plan.outputs.exitcode }}
+
+    steps:
+      # Checkout the repository to the GitHub Actions runner
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      # Install the latest version of the Terraform CLI
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          terraform_wrapper: false
+
+      # Initialize a new or existing Terraform working directory by creating initial files, loading any remote state, downloading modules, etc.
+      - name: Terraform Init
+        run: terraform init
+
+      # Login to Azure CLI to support temporary runner IP allow-list
+      - name: Setup Azure CLI
+        uses: azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5 # v2.3.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      #Get the IP address of the GitHub Actions runner
+      - name: Get GitHub Actions Runner IP
+        id: get-runner-ip
+        run: |
+          IP=$(curl -s https://api.ipify.org)
+          echo "Runner IP: $IP"
+          echo "TF_VAR_runner_ip=$IP/32" >> $GITHUB_ENV
+          echo "runner_ip=$IP" >> $GITHUB_OUTPUT
+
+      - name: Get storage accounts from module matching 'mta-sts'
+        id: get-storage-accounts
+        run: |
+          # Extract pairs of storage account name and resource group name separated by a comma
+          PAIRS=$(terraform state pull | jq -r '
+            .resources[]
+            | select(
+                .type == "azurerm_storage_account"
+                and (.module != null)
+                and (.name | test("mta-sts"))
+              )
+            | .instances[]
+            | "\(.attributes.name),\(.attributes.resource_group_name)"
+          ' | sort -u)
+
+          echo "Found storage accounts and resource groups:"
+          echo "$PAIRS"
+
+          # Set output for later steps; replacing newlines with semicolons to keep it as one string
+          FORMATTED_OUTPUT=$(echo "$PAIRS" | paste -sd ";" -)
+          echo "storage_accounts_and_rgs=$FORMATTED_OUTPUT" >> $GITHUB_OUTPUT
+
+      - name: Temporarily Allow Runner IP and test
+        run: |
+          IFS=';' read -ra PAIRS <<< "${{ steps.get-storage-accounts.outputs.storage_accounts_and_rgs }}"  
+          for pair in "${PAIRS[@]}"; do
+            IFS=',' read -ra PARTS <<< "$pair"
+            STORAGE_ACCOUNT="${PARTS[0]}"
+             RESOURCE_GROUP="${PARTS[1]}"
+             
+            echo "::group::Adding firewall rule for $STORAGE_ACCOUNT in $RESOURCE_GROUP..."
+            az storage account network-rule add --resource-group $RESOURCE_GROUP  --account-name $STORAGE_ACCOUNT --ip-address ${{ steps.get-runner-ip.outputs.runner_ip }} > /dev/null
+             
+            echo "⏳ Verifying access for $STORAGE_ACCOUNT..."
+            for i in {1..10}; do
+              echo "Attempt $i for $STORAGE_ACCOUNT..."
+              if az storage container list \
+                --account-name "$STORAGE_ACCOUNT" \
+                --auth-mode login >/dev/null 2>&1; then
+                echo "✅ Access confirmed for $STORAGE_ACCOUNT"
+                break
+              else
+                echo "Still waiting for firewall rule to propagate..."
+                sleep 10
+              fi
+
+              if [ "$i" -eq 10 ]; then
+                echo "❌ Firewall rule for $STORAGE_ACCOUNT not active after waiting."
+                exit 1
+              fi
+            done
+            echo "::endgroup::"
+          done
+
+      # Checks that all Terraform configuration files adhere to a canonical format
+      # Will fail the build if not
+      - name: Terraform Format
+        run: terraform fmt -check
+
+      # Generates an execution plan for Terraform
+      # An exit code of 0 indicated no changes, 1 a terraform failure, 2 there are pending changes.
+      - name: Terraform Plan
+        id: tf-plan
+        run: |
+          export exitcode=0
+          terraform plan -detailed-exitcode -var="runner-ip=${{ env.TF_VAR_runner_ip }}" -no-color -out tfplan || export exitcode=$?
+
+          echo "exitcode is $exitcode"
+          echo "exitcode=$exitcode" >> $GITHUB_OUTPUT
+
+          if [ $exitcode -eq 1 ]; then
+            echo Terraform Plan Failed!
+            exit 1
+          else 
+            exit 0
+          fi
+
+      - name: Show Terraform Plan Exit Code
+        id: show-tf-plan-exit-code
+        run: |
+          echo "Terraform Plan Exit Code: ${{ steps.tf-plan.outputs.exitcode }}"
+
+      #Save plan to artifacts
+      - name: Publish Terraform Plan
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: tfplan
+          path: terraform/tfplan
+
+      # Create string output of Terraform Plan
+      - name: Create String Output
+        id: tf-plan-string
+        run: |
+          TERRAFORM_PLAN=$(terraform show -no-color tfplan)
+
+          delimiter="$(openssl rand -hex 8)"
+          echo "summary<<${delimiter}" >> $GITHUB_OUTPUT
+          echo "## Terraform Plan Output" >> $GITHUB_OUTPUT
+          echo "<details><summary>Click to expand</summary>" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo '```terraform' >> $GITHUB_OUTPUT
+          echo "$TERRAFORM_PLAN" >> $GITHUB_OUTPUT
+          echo '```' >> $GITHUB_OUTPUT
+          echo "</details>" >> $GITHUB_OUTPUT
+          echo "${delimiter}" >> $GITHUB_OUTPUT
+
+      # Publish Terraform Plan as task summary
+      - name: Publish Terraform Plan to Task Summary
+        env:
+          SUMMARY: ${{ steps.tf-plan-string.outputs.summary }}
+        run: |
+          echo "$SUMMARY" >> $GITHUB_STEP_SUMMARY
+
+      # If this is a PR post the changes
+      - name: Push Terraform Output to PR
+        if: github.ref != 'refs/heads/main'
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        env:
+          SUMMARY: "${{ steps.tf-plan-string.outputs.summary }}"
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const body = `${process.env.SUMMARY}`;
+            github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: body
+            })
+      # Terraform Apply
+      - name: Terraform Apply
+        if: github.ref == 'refs/heads/main' && steps.tf-plan.outputs.exitcode == 2
+        run: terraform apply -auto-approve tfplan
+
+      # Remove the storage account firewall rule for the runner IP
+      - name: Remove Runner IP from Storage Account Firewall
+        if: always()
+        run: |
+          IFS=';' read -ra PAIRS <<< "${{ steps.get-storage-accounts.outputs.storage_accounts_and_rgs }}"  
+          for pair in "${PAIRS[@]}"; do
+            IFS=',' read -ra PARTS <<< "$pair"
+            STORAGE_ACCOUNT="${PARTS[0]}"
+            RESOURCE_GROUP="${PARTS[1]}"
+            echo "Storage account: $STORAGE_ACCOUNT, Resource group: $RESOURCE_GROUP"
+            az storage account network-rule remove --resource-group $RESOURCE_GROUP  --account-name $STORAGE_ACCOUNT --ip-address ${{ steps.get-runner-ip.outputs.runner_ip }} > /dev/null
+          done
+
