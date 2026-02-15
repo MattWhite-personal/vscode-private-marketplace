@@ -92,6 +92,25 @@ resource "azurerm_container_app_environment" "env" {
   }
 }
 
+resource "azurerm_container_app_environment_storage" "extensions" {
+  name                         = "extensions"
+  container_app_environment_id = azurerm_container_app_environment.env.id
+  account_name                 = azurerm_storage_account.sa.name
+  share_name                   = azurerm_storage_share.extensions.name
+  access_key                   = azurerm_storage_account.sa.primary_access_key
+  access_mode                  = "ReadOnly"
+}
+
+resource "azurerm_container_app_environment_storage" "logs" {
+  name                         = "logs"
+  container_app_environment_id = azurerm_container_app_environment.env.id
+  account_name                 = azurerm_storage_account.sa.name
+  share_name                   = azurerm_storage_share.logs.name
+  access_key                   = azurerm_storage_account.sa.primary_access_key
+  access_mode                  = "ReadWrite"
+}
+
+
 resource "azurerm_container_app" "app" {
   name                         = "ca-${var.resource_name_suffix}"
   container_app_environment_id = azurerm_container_app_environment.env.id
