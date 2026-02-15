@@ -153,6 +153,11 @@ resource "azurerm_container_app" "app" {
         value = "/data/logs"
       }
 
+      env {
+        name  = "Marketplace__Upstreaming__Mode"
+        value = "Search"
+      }
+
       # Mount extensions share
       volume_mounts {
         name = "extensions"
