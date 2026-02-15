@@ -6,6 +6,11 @@ variable "container_registry_username" {
 variable "container_registry_password" {
   type      = string
   sensitive = true
+
+  validation {
+    condition     = length(var.container_registry_password) > 0
+    error_message = "container_registry_password must be provided and not empty."
+  }
 }
 
 variable "image_tag" {
