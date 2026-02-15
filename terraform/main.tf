@@ -53,8 +53,6 @@ resource "azurerm_storage_account" "sa" {
   #checkov:skip=CKV_AZURE_206: testing
   #checkov:skip=CKV_AZURE_44: testing
   #checkov:skip=CKV_AZURE_59: testing
-
-  count                    = local.create_storage_account ? 1 : 0
   name                     = "stvscodeprivatemktplce"
   resource_group_name      = azurerm_resource_group.rg.name
   location                 = local.location
@@ -63,17 +61,15 @@ resource "azurerm_storage_account" "sa" {
 }
 
 resource "azurerm_storage_share" "extensions" {
-  count                = local.use_filesystem_source ? 1 : 0
-  name                 = "extensions"
-  storage_account_name = azurerm_storage_account.sa[0].name
-  quota                = 5
+  name               = "extensions"
+  storage_account_id = azurerm_storage_account.sa.id
+  quota              = 5
 }
 
 resource "azurerm_storage_share" "logs" {
-  count                = var.enable_file_logging ? 1 : 0
-  name                 = "logs"
-  storage_account_name = azurerm_storage_account.sa[0].name
-  quota                = 5
+  name               = "logs"
+  storage_account_id = azurerm_storage_account.sa.id
+  quota              = 5
 }
 
 
@@ -121,72 +117,48 @@ resource "azurerm_container_app" "app" {
         name  = "APPLICATIONINSIGHTS_CONNECTION_STRING"
         value = azurerm_application_insights.ai.connection_string
       }
-
-      dynamic "env" {
-        for_each = var.enable_console_logging ? [1] : []
-        content {
-          name  = "Marketplace__Logging__LogToConsole"
-          value = "true"
-        }
+      env {
+        name  = "Marketplace__Logging__LogToConsole"
+        value = "true"
       }
 
       # Filesystem extension source
-      dynamic "env" {
-        for_each = local.use_filesystem_source ? [1] : []
-        content {
-          name  = "Marketplace__ExtensionSourceDirectory"
-          value = "/data/extensions"
-        }
+      env {
+        name  = "Marketplace__ExtensionSourceDirectory"
+        value = "/data/extensions"
       }
 
       # Logs directory
-      dynamic "env" {
-        for_each = var.enable_file_logging ? [1] : []
-        content {
-          name  = "Marketplace__LogsDirectory"
-          value = "/data/logs"
-        }
+      env {
+        name  = "Marketplace__LogsDirectory"
+        value = "/data/logs"
       }
 
       # Mount extensions share
-      dynamic "volume_mounts" {
-        for_each = local.use_filesystem_source ? [1] : []
-        content {
-          name = "extensions"
-          path = "/data/extensions"
-        }
+      volume_mounts {
+        name = "extensions"
+        path = "/data/extensions"
       }
 
       # Mount logs share
-      dynamic "volume_mounts" {
-        for_each = var.enable_file_logging ? [1] : []
-        content {
-          name = "logs"
-          path = "/data/logs"
-        }
+      volume_mounts {
+        name = "logs"
+        path = "/data/logs"
       }
-
-
     }
 
     # Extensions volume
-    dynamic "volume" {
-      for_each = local.use_filesystem_source ? [1] : []
-      content {
-        name         = "extensions"
-        storage_name = azurerm_container_app_environment_storage.extensions[0].name
-        storage_type = "AzureFile"
-      }
+    volume {
+      name         = "extensions"
+      storage_name = azurerm_container_app_environment_storage.extensions[0].name
+      storage_type = "AzureFile"
     }
 
     # Logs volume
-    dynamic "volume" {
-      for_each = var.enable_file_logging ? [1] : []
-      content {
-        name         = "logs"
-        storage_name = azurerm_container_app_environment_storage.logs[0].name
-        storage_type = "AzureFile"
-      }
+    volume {
+      name         = "logs"
+      storage_name = azurerm_container_app_environment_storage.logs[0].name
+      storage_type = "AzureFile"
     }
 
 
@@ -204,7 +176,6 @@ resource "azurerm_container_app" "app" {
       latest_revision = true
       percentage      = 100
     }
-
   }
 
   registry {
@@ -218,21 +189,6 @@ resource "azurerm_container_app" "app" {
     value = var.container_registry_password
   }
 }
-
-resource "azurerm_storage_share" "extensions" {
-  count                = local.use_filesystem_source ? 1 : 0
-  name                 = "extensions"
-  storage_account_name = azurerm_storage_account.sa[0].name
-  quota                = 5
-}
-
-resource "azurerm_storage_share" "logs" {
-  count                = var.enable_file_logging ? 1 : 0
-  name                 = "logs"
-  storage_account_name = azurerm_storage_account.sa[0].name
-  quota                = 5
-}
-
 
 output "container_app_url" {
   value = "https://${azurerm_container_app.app.latest_revision_fqdn}/"
