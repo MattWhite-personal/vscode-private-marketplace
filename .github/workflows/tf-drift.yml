@@ -25,8 +25,9 @@ env:
   ARM_CLIENT_ID: "${{ secrets.AZURE_CLIENT_ID }}"
   ARM_SUBSCRIPTION_ID: "${{ secrets.AZURE_SUBSCRIPTION_ID }}"
   ARM_TENANT_ID: "${{ secrets.AZURE_TENANT_ID }}"
-  TF_VAR_runner_ip: ""
+  #TF_VAR_runner_ip: ""
   TF_VAR_repository: "${{ github.repository }}"
+  TF_VAR_PASSWORD: ${{ secrets.TF_VAR_PASSWORD }}
 
 jobs:
   drift-detection:
@@ -60,75 +61,14 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      #Get the IP address of the GitHub Actions runner
-      - name: Get GitHub Actions Runner IP
-        id: get-runner-ip
-        run: |
-          IP=$(curl -s https://api.ipify.org)
-          echo "Runner IP: $IP"
-          echo "TF_VAR_runner_ip=$IP/32" >> $GITHUB_ENV
-          echo "runner_ip=$IP" >> $GITHUB_OUTPUT
-
-      - name: Get storage accounts from module matching 'mta-sts'
-        id: get-storage-accounts
-        run: |
-          # Extract pairs of storage account name and resource group name separated by a comma
-          PAIRS=$(terraform state pull | jq -r '
-            .resources[]
-            | select(
-              .type == "azurerm_storage_account"
-              and (.module != null)
-              and (.name | test("mta-sts"))
-            )
-            | .instances[]
-            | "\(.attributes.name),\(.attributes.resource_group_name)"
-          ' | sort -u)
-
-          echo "Found storage accounts and resource groups:"
-          echo "$PAIRS"
-
-          # Set output for later steps; replacing newlines with semicolons to keep it as one string
-          FORMATTED_OUTPUT=$(echo "$PAIRS" | paste -sd ";" -)
-          echo "storage_accounts_and_rgs=$FORMATTED_OUTPUT" >> $GITHUB_OUTPUT
-
-      - name: Temporarily Allow Runner IP and test
-        run: |
-          IFS=';' read -ra PAIRS <<< "${{ steps.get-storage-accounts.outputs.storage_accounts_and_rgs }}"  
-          for pair in "${PAIRS[@]}"; do
-            IFS=',' read -ra PARTS <<< "$pair"
-            STORAGE_ACCOUNT="${PARTS[0]}"
-            RESOURCE_GROUP="${PARTS[1]}"
-             
-            echo "➡️ Adding firewall rule for $STORAGE_ACCOUNT in $RESOURCE_GROUP..."
-            az storage account network-rule add --resource-group $RESOURCE_GROUP  --account-name $STORAGE_ACCOUNT --ip-address ${{ steps.get-runner-ip.outputs.runner_ip }} > /dev/null
-             
-            echo "⏳ Verifying access for $STORAGE_ACCOUNT..."
-            for i in {1..10}; do
-              echo "Attempt $i for $STORAGE_ACCOUNT..."
-              if az storage container list \
-                --account-name "$STORAGE_ACCOUNT" \
-                --auth-mode login >/dev/null 2>&1; then
-                echo "✅ Access confirmed for $STORAGE_ACCOUNT"
-                break
-              else
-                echo "Still waiting for firewall rule to propagate..."
-                sleep 10
-              fi
-
-              if [ "$i" -eq 10 ]; then
-                echo "❌ Firewall rule for $STORAGE_ACCOUNT not active after waiting."
-                exit 1
-              fi
-            done
-          done
-
+      
       # Generates an execution plan for Terraform
       # An exit code of 0 indicated no changes, 1 a terraform failure, 2 there are pending changes.
       - name: Terraform Plan
         id: tf-plan
         run: |
           export exitcode=0
-          terraform plan -detailed-exitcode -var="runner-ip=${{ env.TF_VAR_runner_ip }}" -no-color -out tfplan || export exitcode=$?
+          terraform plan -detailed-exitcode -var="container_registry_password=${{ env.TF_VAR_PASSWORD }}" -no-color -out tfplan || export exitcode=$?
 
           echo "exitcode=$exitcode" >> $GITHUB_OUTPUT
 
@@ -340,19 +280,6 @@ jobs:
                 console.log(`Created issue #${created.data.number} without assignee`);
               }
             }
-
-      # Remove the storage account firewall rule for the runner IP
-      - name: Remove Runner IP from Storage Account Firewall
-        if: always()
-        run: |
-          IFS=';' read -ra PAIRS <<< "${{ steps.get-storage-accounts.outputs.storage_accounts_and_rgs }}"  
-          for pair in "${PAIRS[@]}"; do
-            IFS=',' read -ra PARTS <<< "$pair"
-            STORAGE_ACCOUNT="${PARTS[0]}"
-            RESOURCE_GROUP="${PARTS[1]}"
-            echo "Storage account: $STORAGE_ACCOUNT, Resource group: $RESOURCE_GROUP"
-            az storage account network-rule remove --resource-group $RESOURCE_GROUP  --account-name $STORAGE_ACCOUNT --ip-address ${{ steps.get-runner-ip.outputs.runner_ip }} > /dev/null
-          done
 
       # Mark the workflow as failed if drift detected
       - name: Error on Failure
