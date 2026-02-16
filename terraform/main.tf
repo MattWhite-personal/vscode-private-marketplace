@@ -155,7 +155,7 @@ resource "azurerm_container_app" "app" {
 
       env {
         name  = "Marketplace__Upstreaming__Mode"
-        value = "Search"
+        value = "none"
       }
 
       # Mount extensions share
