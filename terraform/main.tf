@@ -19,6 +19,7 @@ provider "azurerm" {
   use_oidc = true
 }
 
+/*
 resource "azurerm_resource_group" "rg" {
   name     = "rg-${var.resource_name_suffix}"
   location = local.location
@@ -225,3 +226,4 @@ output "extension_source_type" {
 output "client_id" {
   value = local.use_artifacts_source ? azurerm_user_assigned_identity.identity[0].client_id : null
 }
+*/
