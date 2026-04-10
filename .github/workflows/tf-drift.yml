@@ -35,6 +35,7 @@ jobs:
     env:
       #this is needed since we are running terraform with read-only permissions
       ARM_SKIP_PROVIDER_REGISTRATION: true
+      TF_VAR_PASSWORD: ${{ secrets.TF_VAR_PASSWORD }}   
     outputs:
       tfplanExitCode: ${{ steps.tf-plan.outputs.exitcode }}
 
