@@ -129,8 +129,7 @@ jobs:
         id: tf-plan
         run: |
           export exitcode=0
-          terraform plan -detailed-exitcode -var="runner-ip=${{ env.TF_VAR_runner_ip }}" -no-color -out tfplan || export exitcode=$?
-
+          terraform plan -detailed-exitcode -var="container_registry_password=${{ env.TF_VAR_PASSWORD }}" -no-color -out tfplan || export exitcode=$?
           echo "exitcode=$exitcode" >> $GITHUB_OUTPUT
 
           if [ $exitcode -eq 1 ]; then
