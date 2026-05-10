@@ -2,11 +2,6 @@ name: "Terraform Configuration Drift Detection"
 
 on:
   workflow_dispatch:
-    inputs:
-      inject_failure:
-        description: 'Set to "true" to inject a failure after tf-plan to test failure handling (non-tf-plan failures).'
-        required: false
-        default: 'false'
   schedule:
     - cron: "41 3 * * *" # runs nightly at 3:41 am
 
@@ -169,14 +164,7 @@ jobs:
           SUMMARY: ${{ steps.tf-plan-string.outputs.summary }}
         run: |
           echo "$SUMMARY" >> $GITHUB_STEP_SUMMARY
-
-      # Optional: Inject a failure (test only) — set inject_failure input to "true" when dispatching to exercise failure handling
-      - name: Inject Failure (test only)
-        if: ${{ github.event.inputs.inject_failure == 'true' }}
-        run: |
-          echo "🔧 Injecting test failure as requested (workflow_dispatch.inject_failure == 'true')"
-          exit 1
-      
+          
       # Diagnostic: dump useful context when job fails (helps validate the failure-handling behavior)
       - name: Diagnostic Debug Info
         if: failure()
